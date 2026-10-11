@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed } from "vue";
 import EditTimerModal from "./components/EditTimerModal.vue";
+import StatsModal from "./components/StatsModal.vue";
 
 // State Timer Utama
 const hours = ref(0);
@@ -14,8 +15,9 @@ const timeDisplay = computed(() => {
   return `${pad(hours.value)}:${pad(minutes.value)}:${pad(seconds.value)}`;
 });
 
-// State Modal Edit Timer
+// State Modal Edit Timer & Statistik
 const showEditModal = ref(false);
+const showStatsModal = ref(false);
 
 function handleSaveTimer(newTime) {
   hours.value = newTime.hours;
@@ -32,8 +34,9 @@ function handleSaveTimer(newTime) {
       <!-- Tombol Statistik Belajar -->
       <button 
         type="button"
+        @click="showStatsModal = true"
         title="Statistik Belajar"
-        class="p-2.5 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10 active:scale-95 transition-all"
+        class="p-2.5 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10 active:scale-95 transition-all cursor-pointer"
       >
         <!-- Bar Chart / Statistics Icon -->
         <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -65,7 +68,7 @@ function handleSaveTimer(newTime) {
       <button
         type="button"
         aria-label="Start Timer"
-        class="w-16 h-16 rounded-full bg-[#d8b4e2] hover:bg-[#cb9ed6] active:scale-95 transition-all flex items-center justify-center shadow-lg"
+        class="w-16 h-16 rounded-full bg-[#d8b4e2] hover:bg-[#cb9ed6] active:scale-95 transition-all flex items-center justify-center shadow-lg cursor-pointer"
       >
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-7 h-7 text-black translate-x-0.5">
           <path d="M5 3.868v16.264a1 1 0 0 0 1.545.841l12.443-8.132a1 1 0 0 0 0-1.682L6.545 3.027A1 1 0 0 0 5 3.868z" />
@@ -76,7 +79,7 @@ function handleSaveTimer(newTime) {
       <button
         type="button"
         aria-label="Reset Timer"
-        class="w-16 h-16 rounded-full bg-[#2c2438] hover:bg-[#382f48] active:scale-95 transition-all flex items-center justify-center text-[#9f94b0] hover:text-white"
+        class="w-16 h-16 rounded-full bg-[#2c2438] hover:bg-[#382f48] active:scale-95 transition-all flex items-center justify-center text-[#9f94b0] hover:text-white cursor-pointer"
       >
         <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -93,8 +96,15 @@ function handleSaveTimer(newTime) {
       @save="handleSaveTimer"
       @close="showEditModal = false"
     />
+
+    <!-- MODAL STATISTIK BELAJAR (Component) -->
+    <StatsModal
+      v-if="showStatsModal"
+      @close="showStatsModal = false"
+    />
   </main>
 </template>
+
 
 
 
