@@ -1,5 +1,6 @@
 <script setup>
-import { ref } from "vue";
+import { ref, onMounted, onUnmounted } from "vue";
+import TimeAdjustButton from "./TimeAdjustButton.vue";
 
 const props = defineProps({
   initialHours: {
@@ -23,7 +24,16 @@ const tempHours = ref(props.initialHours);
 const tempMinutes = ref(props.initialMinutes);
 const tempSeconds = ref(props.initialSeconds);
 
+// Flag untuk pengetikan digit pertama pada unit aktif
+const isFirstDigit = ref(true);
+
+function selectUnit(unit) {
+  activeUnit.value = unit;
+  isFirstDigit.value = true;
+}
+
 function adjustUnit(unit, delta) {
+  isFirstDigit.value = true;
   if (unit === "hours") {
     tempHours.value = Math.max(0, Math.min(99, tempHours.value + delta));
   } else if (unit === "minutes") {
@@ -37,6 +47,7 @@ function resetTempTimer() {
   tempHours.value = 0;
   tempMinutes.value = 0;
   tempSeconds.value = 0;
+  isFirstDigit.value = true;
 }
 
 function pad(val) {
@@ -54,6 +65,96 @@ function handleSave() {
 function handleClose() {
   emit("close");
 }
+
+// Handler input keyboard
+function handleKeyDown(e) {
+  // 1. Input Angka 0-9
+  if (/^[0-9]$/.test(e.key)) {
+    e.preventDefault();
+    const digit = parseInt(e.key, 10);
+
+    if (activeUnit.value === "hours") {
+      if (isFirstDigit.value) {
+        tempHours.value = digit;
+        isFirstDigit.value = false;
+      } else {
+        tempHours.value = Math.min(99, tempHours.value * 10 + digit);
+        activeUnit.value = "minutes";
+        isFirstDigit.value = true;
+      }
+    } else if (activeUnit.value === "minutes") {
+      if (isFirstDigit.value) {
+        tempMinutes.value = digit;
+        isFirstDigit.value = false;
+      } else {
+        tempMinutes.value = Math.min(59, tempMinutes.value * 10 + digit);
+        activeUnit.value = "seconds";
+        isFirstDigit.value = true;
+      }
+    } else if (activeUnit.value === "seconds") {
+      if (isFirstDigit.value) {
+        tempSeconds.value = digit;
+        isFirstDigit.value = false;
+      } else {
+        tempSeconds.value = Math.min(59, tempSeconds.value * 10 + digit);
+        isFirstDigit.value = true;
+      }
+    }
+    return;
+  }
+
+  // 2. Navigasi Antar Kolom (Panah Kiri / Kanan atau Tab)
+  if (e.key === "ArrowLeft") {
+    e.preventDefault();
+    if (activeUnit.value === "seconds") selectUnit("minutes");
+    else if (activeUnit.value === "minutes") selectUnit("hours");
+  } else if (e.key === "ArrowRight") {
+    e.preventDefault();
+    if (activeUnit.value === "hours") selectUnit("minutes");
+    else if (activeUnit.value === "minutes") selectUnit("seconds");
+  } else if (e.key === "Tab") {
+    e.preventDefault();
+    if (e.shiftKey) {
+      if (activeUnit.value === "seconds") selectUnit("minutes");
+      else if (activeUnit.value === "minutes") selectUnit("hours");
+    } else {
+      if (activeUnit.value === "hours") selectUnit("minutes");
+      else if (activeUnit.value === "minutes") selectUnit("seconds");
+    }
+  } 
+  // 3. Tambah / Kurang Waktu (Panah Atas / Bawah)
+  else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    adjustUnit(activeUnit.value, 1);
+  } else if (e.key === "ArrowDown") {
+    e.preventDefault();
+    adjustUnit(activeUnit.value, -1);
+  } 
+  // 4. Backspace (Reset kolom aktif ke 0)
+  else if (e.key === "Backspace") {
+    e.preventDefault();
+    if (activeUnit.value === "hours") tempHours.value = 0;
+    else if (activeUnit.value === "minutes") tempMinutes.value = 0;
+    else if (activeUnit.value === "seconds") tempSeconds.value = 0;
+    isFirstDigit.value = true;
+  } 
+  // 5. Enter (Simpan) dan Escape (Tutup)
+  else if (e.key === "Enter") {
+    e.preventDefault();
+    handleSave();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    handleClose();
+  }
+}
+
+onMounted(() => {
+  window.addEventListener("keydown", handleKeyDown);
+});
+
+onUnmounted(() => {
+  window.removeEventListener("keydown", handleKeyDown);
+});
 </script>
 
 <template>
@@ -69,7 +170,7 @@ function handleClose() {
           type="button"
           @click="resetTempTimer"
           title="Reset timer ke 00:00:00"
-          class="text-rose-400 hover:text-rose-300 p-1 rounded-md hover:bg-rose-500/10 transition-colors"
+          class="text-rose-400 hover:text-rose-300 p-1 rounded-md hover:bg-rose-500/10 transition-colors cursor-pointer"
         >
           <!-- Trash Icon -->
           <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
@@ -80,31 +181,13 @@ function handleClose() {
 
       <!-- Time Picker Columns (HH : MM : SS) -->
       <div class="flex flex-col items-center gap-1.5">
-        <!-- Chevron Up Buttons -->
+        <!-- Chevron Up Buttons (Menggunakan TimeAdjustButton) -->
         <div class="grid grid-cols-[1fr_auto_1fr_auto_1fr] items-center w-full text-neutral-400">
-          <button 
-            type="button"
-            @click="adjustUnit('hours', 1)" 
-            class="flex justify-center hover:text-white py-1 transition-colors"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m18 15-6-6-6 6"/></svg>
-          </button>
+          <TimeAdjustButton direction="up" @click="adjustUnit('hours', 1)" />
           <div class="w-4"></div>
-          <button 
-            type="button"
-            @click="adjustUnit('minutes', 1)" 
-            class="flex justify-center hover:text-white py-1 transition-colors"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m18 15-6-6-6 6"/></svg>
-          </button>
+          <TimeAdjustButton direction="up" @click="adjustUnit('minutes', 1)" />
           <div class="w-4"></div>
-          <button 
-            type="button"
-            @click="adjustUnit('seconds', 1)" 
-            class="flex justify-center hover:text-white py-1 transition-colors"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m18 15-6-6-6 6"/></svg>
-          </button>
+          <TimeAdjustButton direction="up" @click="adjustUnit('seconds', 1)" />
         </div>
 
         <!-- Time Display Box with Active Column Highlighting -->
@@ -112,9 +195,9 @@ function handleClose() {
           <!-- Hours Column -->
           <button
             type="button"
-            @click="activeUnit = 'hours'"
+            @click="selectUnit('hours')"
             :class="[
-              'py-4 text-3xl font-bold text-center transition-colors relative',
+              'py-4 text-3xl font-bold text-center transition-colors relative cursor-pointer',
               activeUnit === 'hours' ? 'bg-[#29292e] text-white' : 'text-neutral-400 hover:text-neutral-200'
             ]"
           >
@@ -128,9 +211,9 @@ function handleClose() {
           <!-- Minutes Column -->
           <button
             type="button"
-            @click="activeUnit = 'minutes'"
+            @click="selectUnit('minutes')"
             :class="[
-              'py-4 text-3xl font-bold text-center transition-colors relative',
+              'py-4 text-3xl font-bold text-center transition-colors relative cursor-pointer',
               activeUnit === 'minutes' ? 'bg-[#29292e] text-white' : 'text-neutral-400 hover:text-neutral-200'
             ]"
           >
@@ -144,9 +227,9 @@ function handleClose() {
           <!-- Seconds Column -->
           <button
             type="button"
-            @click="activeUnit = 'seconds'"
+            @click="selectUnit('seconds')"
             :class="[
-              'py-4 text-3xl font-bold text-center transition-colors relative',
+              'py-4 text-3xl font-bold text-center transition-colors relative cursor-pointer',
               activeUnit === 'seconds' ? 'bg-[#29292e] text-white' : 'text-neutral-400 hover:text-neutral-200'
             ]"
           >
@@ -155,31 +238,13 @@ function handleClose() {
           </button>
         </div>
 
-        <!-- Chevron Down Buttons -->
+        <!-- Chevron Down Buttons (Menggunakan TimeAdjustButton) -->
         <div class="grid grid-cols-[1fr_auto_1fr_auto_1fr] items-center w-full text-neutral-400">
-          <button 
-            type="button"
-            @click="adjustUnit('hours', -1)" 
-            class="flex justify-center hover:text-white py-1 transition-colors"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
-          </button>
+          <TimeAdjustButton direction="down" @click="adjustUnit('hours', -1)" />
           <div class="w-4"></div>
-          <button 
-            type="button"
-            @click="adjustUnit('minutes', -1)" 
-            class="flex justify-center hover:text-white py-1 transition-colors"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
-          </button>
+          <TimeAdjustButton direction="down" @click="adjustUnit('minutes', -1)" />
           <div class="w-4"></div>
-          <button 
-            type="button"
-            @click="adjustUnit('seconds', -1)" 
-            class="flex justify-center hover:text-white py-1 transition-colors"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
-          </button>
+          <TimeAdjustButton direction="down" @click="adjustUnit('seconds', -1)" />
         </div>
       </div>
 
@@ -189,7 +254,7 @@ function handleClose() {
         <button
           type="button"
           @click="handleSave"
-          class="flex items-center justify-center gap-2 py-2.5 px-4 rounded-md bg-[#d8b4e2] text-black font-medium text-sm hover:bg-[#cba0d6] active:scale-98 transition-all shadow-md"
+          class="flex items-center justify-center gap-2 py-2.5 px-4 rounded-md bg-[#d8b4e2] text-black font-medium text-sm hover:bg-[#cba0d6] active:scale-98 transition-all shadow-md cursor-pointer"
         >
           <!-- Save / Floppy Disk Icon -->
           <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -202,7 +267,7 @@ function handleClose() {
         <button
           type="button"
           @click="handleClose"
-          class="flex items-center justify-center gap-2 py-2.5 px-4 rounded-md bg-[#29292e] text-neutral-200 font-medium text-sm hover:bg-[#34343b] active:scale-98 transition-all"
+          class="flex items-center justify-center gap-2 py-2.5 px-4 rounded-md bg-[#29292e] text-neutral-200 font-medium text-sm hover:bg-[#34343b] active:scale-98 transition-all cursor-pointer"
         >
           <!-- Cancel / X Icon -->
           <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -214,3 +279,4 @@ function handleClose() {
     </div>
   </div>
 </template>
+
