@@ -100,7 +100,7 @@ function getBoxClass(dayItem) {
     class="fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px] flex items-center justify-center p-3 select-none"
     @click.self="emit('close')"
   >
-    <div class="bg-[#1f1f23] border border-neutral-800/80 rounded-xl w-full max-w-[390px] p-5 shadow-2xl flex flex-col gap-4 text-neutral-100 animate-in fade-in zoom-in-95 duration-150">
+    <div class="bg-[#1f1f23] border border-neutral-800/80 rounded-xl w-full max-w-97.5 p-5 shadow-2xl flex flex-col gap-4 text-neutral-100 animate-in fade-in zoom-in-95 duration-150">
       <!-- Header Modal -->
       <div class="flex items-center justify-between pb-1 border-b border-neutral-800">
         <div>

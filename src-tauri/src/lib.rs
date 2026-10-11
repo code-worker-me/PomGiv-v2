@@ -1,9 +1,25 @@
+mod db;
+
+use std::sync::Mutex;
 use tauri::Manager;
 
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+pub struct DbState(pub Mutex<rusqlite::Connection>);
+
 #[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
+fn get_timer_settings(state: tauri::State<DbState>) -> Result<db::TimerSettings, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    db::get_settings(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn save_timer_settings(
+    state: tauri::State<DbState>,
+    hours: u32,
+    minutes: u32,
+    seconds: u32,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    db::save_settings(&conn, hours, minutes, seconds).map_err(|e| e.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -16,8 +32,18 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet])
+        .setup(|app| {
+            let conn = db::init_db(app.handle())
+                .map_err(|e| Box::<dyn std::error::Error>::from(e))?;
+            app.manage(DbState(Mutex::new(conn)));
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            get_timer_settings,
+            save_timer_settings
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
 

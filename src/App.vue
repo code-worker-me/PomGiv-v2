@@ -1,9 +1,10 @@
 <script setup>
-import { ref, computed } from "vue";
+import { ref, computed, onMounted } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import EditTimerModal from "./components/EditTimerModal.vue";
 import StatsModal from "./components/StatsModal.vue";
 
-// State Timer Utama
+// State Timer Utama (default 25 menit)
 const hours = ref(0);
 const minutes = ref(25);
 const seconds = ref(0);
@@ -19,13 +20,39 @@ const timeDisplay = computed(() => {
 const showEditModal = ref(false);
 const showStatsModal = ref(false);
 
-function handleSaveTimer(newTime) {
+// Ambil data timer terakhir dari database SQLite saat aplikasi terbuka
+onMounted(async () => {
+  try {
+    const data = await invoke("get_timer_settings");
+    if (data) {
+      hours.value = data.hours;
+      minutes.value = data.minutes;
+      seconds.value = data.seconds;
+    }
+  } catch (err) {
+    console.error("Gagal mengambil data timer dari SQLite:", err);
+  }
+});
+
+// Simpan timer ke database SQLite di Rust saat user klik Save
+async function handleSaveTimer(newTime) {
   hours.value = newTime.hours;
   minutes.value = newTime.minutes;
   seconds.value = newTime.seconds;
   showEditModal.value = false;
+
+  try {
+    await invoke("save_timer_settings", {
+      hours: newTime.hours,
+      minutes: newTime.minutes,
+      seconds: newTime.seconds,
+    });
+  } catch (err) {
+    console.error("Gagal menyimpan data timer ke SQLite:", err);
+  }
 }
 </script>
+
 
 <template>
   <main class="min-h-screen w-full bg-[#1c1826] text-white flex flex-col justify-between items-center p-6 select-none font-sans relative">
