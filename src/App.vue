@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import EditTimerModal from "./components/EditTimerModal.vue";
 import StatsModal from "./components/StatsModal.vue";
@@ -8,7 +8,14 @@ import StatsModal from "./components/StatsModal.vue";
 const hours = ref(0);
 const minutes = ref(25);
 const seconds = ref(0);
+
+// State Waktu Awal Tersimpan (untuk reset)
+const savedHours = ref(0);
+const savedMinutes = ref(25);
+const savedSeconds = ref(0);
+
 const isRunning = ref(false);
+let timerInterval = null;
 
 // Format waktu 00:00:00
 const timeDisplay = computed(() => {
@@ -28,17 +35,119 @@ onMounted(async () => {
       hours.value = data.hours;
       minutes.value = data.minutes;
       seconds.value = data.seconds;
+      savedHours.value = data.hours;
+      savedMinutes.value = data.minutes;
+      savedSeconds.value = data.seconds;
     }
   } catch (err) {
     console.error("Gagal mengambil data timer dari SQLite:", err);
   }
 });
 
+// Bersihkan interval saat komponen dilepas
+onUnmounted(() => {
+  if (timerInterval) {
+    clearInterval(timerInterval);
+  }
+});
+
+// State Waktu Sesi Berjalan (dalam detik)
+const currentSessionDurationSeconds = ref(0);
+
+// Fungsi Ketika Waktu Timer Habis
+async function handleTimerCompleted() {
+  clearInterval(timerInterval);
+  timerInterval = null;
+  isRunning.value = false;
+
+  const duration = currentSessionDurationSeconds.value;
+  currentSessionDurationSeconds.value = 0;
+
+  // Validasi ketat: HANYA simpan ke database dan munculkan notifikasi jika durasi LEBIH DARI 1 MENIT (> 60 detik)
+  if (duration > 60) {
+    try {
+      await invoke("complete_study_session", { durationSeconds: duration });
+    } catch (err) {
+      console.error("Gagal mencatat sesi belajar dan notifikasi:", err);
+    }
+  }
+}
+
+// Fungsi Play / Pause Countdown Timer
+function toggleTimer() {
+  if (isRunning.value) {
+    // Jeda timer (Pause)
+    clearInterval(timerInterval);
+    timerInterval = null;
+    isRunning.value = false;
+  } else {
+    // Mulai timer (Play)
+    // Jika waktu saat ini 00:00:00, kembalikan ke waktu awal tersimpan
+    if (hours.value === 0 && minutes.value === 0 && seconds.value === 0) {
+      hours.value = savedHours.value;
+      minutes.value = savedMinutes.value;
+      seconds.value = savedSeconds.value;
+    }
+
+    // Jika waktu masih 00:00:00, jangan jalankan
+    if (hours.value === 0 && minutes.value === 0 && seconds.value === 0) {
+      return;
+    }
+
+    // Catat durasi awal sesi (jika belum tercatat dari resume pause)
+    if (!currentSessionDurationSeconds.value || currentSessionDurationSeconds.value === 0) {
+      currentSessionDurationSeconds.value = hours.value * 3600 + minutes.value * 60 + seconds.value;
+    }
+
+    isRunning.value = true;
+    timerInterval = setInterval(() => {
+      if (seconds.value > 0) {
+        seconds.value--;
+      } else if (minutes.value > 0) {
+        minutes.value--;
+        seconds.value = 59;
+      } else if (hours.value > 0) {
+        hours.value--;
+        minutes.value = 59;
+        seconds.value = 59;
+      } else {
+        // Waktu selesai
+        handleTimerCompleted();
+      }
+    }, 1000);
+  }
+}
+
+// Fungsi Reset Timer ke waktu awal
+function handleReset() {
+  if (timerInterval) {
+    clearInterval(timerInterval);
+    timerInterval = null;
+  }
+  isRunning.value = false;
+  currentSessionDurationSeconds.value = 0;
+  hours.value = savedHours.value;
+  minutes.value = savedMinutes.value;
+  seconds.value = savedSeconds.value;
+}
+
 // Simpan timer ke database SQLite di Rust saat user klik Save
 async function handleSaveTimer(newTime) {
+  // Hentikan timer jika sedang berjalan
+  if (timerInterval) {
+    clearInterval(timerInterval);
+    timerInterval = null;
+  }
+  isRunning.value = false;
+  currentSessionDurationSeconds.value = 0;
+
+
   hours.value = newTime.hours;
   minutes.value = newTime.minutes;
   seconds.value = newTime.seconds;
+  savedHours.value = newTime.hours;
+  savedMinutes.value = newTime.minutes;
+  savedSeconds.value = newTime.seconds;
   showEditModal.value = false;
 
   try {
@@ -52,7 +161,6 @@ async function handleSaveTimer(newTime) {
   }
 }
 </script>
-
 
 <template>
   <main class="min-h-screen w-full bg-[#1c1826] text-white flex flex-col justify-between items-center p-6 select-none font-sans relative">
@@ -94,10 +202,16 @@ async function handleSaveTimer(newTime) {
       <!-- Play / Pause Button -->
       <button
         type="button"
-        aria-label="Start Timer"
+        @click="toggleTimer"
+        :aria-label="isRunning ? 'Pause Timer' : 'Start Timer'"
         class="w-16 h-16 rounded-full bg-[#d8b4e2] hover:bg-[#cb9ed6] active:scale-95 transition-all flex items-center justify-center shadow-lg cursor-pointer"
       >
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-7 h-7 text-black translate-x-0.5">
+        <!-- Pause Icon (Saat timer aktif) -->
+        <svg v-if="isRunning" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-7 h-7 text-black">
+          <path fill-rule="evenodd" d="M6.75 5.25a.75.75 0 0 1 .75.75v12a.75.75 0 0 1-1.5 0v-12a.75.75 0 0 1 .75-.75Zm10.5 0a.75.75 0 0 1 .75.75v12a.75.75 0 0 1-1.5 0v-12a.75.75 0 0 1 .75-.75Z" clip-rule="evenodd" />
+        </svg>
+        <!-- Play Icon (Saat timer berhenti / pause) -->
+        <svg v-else xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-7 h-7 text-black translate-x-0.5">
           <path d="M5 3.868v16.264a1 1 0 0 0 1.545.841l12.443-8.132a1 1 0 0 0 0-1.682L6.545 3.027A1 1 0 0 0 5 3.868z" />
         </svg>
       </button>
@@ -105,6 +219,7 @@ async function handleSaveTimer(newTime) {
       <!-- Reset / Restart Button -->
       <button
         type="button"
+        @click="handleReset"
         aria-label="Reset Timer"
         class="w-16 h-16 rounded-full bg-[#2c2438] hover:bg-[#382f48] active:scale-95 transition-all flex items-center justify-center text-[#9f94b0] hover:text-white cursor-pointer"
       >

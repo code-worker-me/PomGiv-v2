@@ -36,6 +36,15 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, Box<dyn std:
         [],
     )?;
 
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS study_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            duration_seconds INTEGER NOT NULL,
+            completed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )",
+        [],
+    )?;
+
     Ok(conn)
 }
 
@@ -66,3 +75,13 @@ pub fn save_settings(conn: &Connection, hours: u32, minutes: u32, seconds: u32) 
 
     Ok(())
 }
+
+pub fn log_study_session(conn: &Connection, duration_seconds: u32) -> Result<()> {
+    conn.execute(
+        "INSERT INTO study_sessions (duration_seconds, completed_at) VALUES (?1, CURRENT_TIMESTAMP)",
+        params![duration_seconds],
+    )?;
+
+    Ok(())
+}
+
