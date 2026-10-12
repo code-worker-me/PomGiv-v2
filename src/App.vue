@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import EditTimerModal from "./components/EditTimerModal.vue";
 import StatsModal from "./components/StatsModal.vue";
-import { playChimeSound } from "./utils/audio.js";
+import { playChimeSound, stopChimeSound } from "./utils/audio.js";
 
 // State Timer Utama (default 25 menit)
 const hours = ref(0);
@@ -84,13 +84,27 @@ onUnmounted(() => {
 // State Waktu Sesi Berjalan (dalam detik)
 const currentSessionDurationSeconds = ref(0);
 
+// State Notifikasi Toast In-App dengan Tombol Dismiss
+const showNotificationToast = ref(false);
+const notificationMinutes = ref(0);
+let notificationTimeout = null;
+
+function dismissNotification() {
+  showNotificationToast.value = false;
+  if (notificationTimeout) {
+    clearTimeout(notificationTimeout);
+    notificationTimeout = null;
+  }
+  stopChimeSound();
+}
+
 // Fungsi Ketika Waktu Timer Habis
 async function handleTimerCompleted() {
   clearInterval(timerInterval);
   timerInterval = null;
   isRunning.value = false;
 
-  // Bunyikan dering lonceng / chime
+  // Bunyikan dering lonceng / chime berprioritas tinggi & audio ducking
   playChimeSound();
 
   const duration = currentSessionDurationSeconds.value;
@@ -98,6 +112,17 @@ async function handleTimerCompleted() {
 
   // Validasi ketat: HANYA simpan ke database dan munculkan notifikasi jika durasi LEBIH DARI 1 MENIT (> 60 detik)
   if (duration > 60) {
+    const mins = Math.floor(duration / 60);
+    notificationMinutes.value = mins;
+    showNotificationToast.value = true;
+
+    // Auto-dismiss toast setelah 12 detik jika tidak ditekan manual
+    if (notificationTimeout) clearTimeout(notificationTimeout);
+    notificationTimeout = setTimeout(() => {
+      showNotificationToast.value = false;
+      notificationTimeout = null;
+    }, 12000);
+
     try {
       await invoke("complete_study_session", { durationSeconds: duration });
     } catch (err) {
@@ -201,8 +226,27 @@ async function handleSaveTimer(newTime) {
   <main 
     v-if="isMiniMode" 
     data-tauri-drag-region 
-    class="h-screen w-full bg-[#1c1826] text-white flex items-center justify-between px-3.5 select-none font-sans cursor-move overflow-hidden border border-[#2c2438]"
+    class="h-screen w-full bg-[#1c1826] text-white flex items-center justify-between px-3.5 select-none font-sans cursor-move overflow-hidden border border-[#2c2438] relative"
   >
+    <!-- Overlay Notifikasi di Mode Mini jika aktif -->
+    <div 
+      v-if="showNotificationToast"
+      class="absolute inset-0 bg-[#251e33] z-50 flex items-center justify-between px-3 border border-[#d8b4e2]/40"
+      data-tauri-drag-region
+    >
+      <div class="flex items-center gap-2 min-w-0" data-tauri-drag-region>
+        <span class="text-xs font-semibold text-emerald-400">Selesai! 🎉</span>
+        <span class="text-[11px] text-neutral-300 truncate">{{ notificationMinutes }}m</span>
+      </div>
+      <button
+        type="button"
+        @click="dismissNotification"
+        class="px-2.5 py-1 rounded bg-[#382c4a] hover:bg-[#47385e] active:scale-95 text-xs font-medium text-neutral-200 hover:text-white cursor-pointer shrink-0 transition-colors"
+      >
+        Dismiss
+      </button>
+    </div>
+
     <!-- Left: Pin Status Indicator + Timer Text -->
     <div class="flex items-center gap-2.5" data-tauri-drag-region>
       <div class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" title="Always on Top aktif"></div>
@@ -259,6 +303,47 @@ async function handleSaveTimer(newTime) {
 
   <!-- Normal Mode Layout -->
   <main v-else class="min-h-screen w-full bg-[#1c1826] text-white flex flex-col justify-between items-center p-6 select-none font-sans relative">
+    <!-- In-App Notification Toast (dengan Tombol Dismiss) -->
+    <transition
+      enter-active-class="transition duration-300 ease-out"
+      enter-from-class="opacity-0 -translate-y-4 scale-95"
+      enter-to-class="opacity-100 translate-y-0 scale-100"
+      leave-active-class="transition duration-200 ease-in"
+      leave-from-class="opacity-100 translate-y-0 scale-100"
+      leave-to-class="opacity-0 -translate-y-2 scale-95"
+    >
+      <div 
+        v-if="showNotificationToast" 
+        class="absolute top-4 left-4 right-4 z-50 bg-[#251e33] border border-[#d8b4e2]/30 shadow-2xl rounded-xl p-3 flex items-center justify-between gap-3 text-white backdrop-blur-md"
+      >
+        <div class="flex items-center gap-3 min-w-0">
+          <div class="w-8 h-8 rounded-full bg-[#d8b4e2]/20 text-[#d8b4e2] flex items-center justify-center shrink-0">
+            <!-- Bell Icon -->
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+              <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+            </svg>
+          </div>
+          <div class="flex flex-col min-w-0">
+            <span class="text-xs font-semibold text-neutral-100 leading-tight truncate">Waktu Selesai! 🎉</span>
+            <span class="text-[11px] text-[#b3a8c5] leading-tight truncate">Sesi belajar {{ notificationMinutes }} menit selesai</span>
+          </div>
+        </div>
+
+        <!-- Tombol Dismiss -->
+        <button
+          type="button"
+          @click="dismissNotification"
+          class="shrink-0 px-3 py-1.5 rounded-lg bg-[#382c4a] hover:bg-[#47385e] active:scale-95 text-xs font-medium text-neutral-200 hover:text-white border border-white/5 transition-all cursor-pointer flex items-center gap-1.5"
+        >
+          <span>Dismiss</span>
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+    </transition>
     <!-- Top Action Icons -->
     <header class="w-full flex justify-end gap-1">
       <!-- Tombol Mode Mini / Floating (Always on Top) -->
