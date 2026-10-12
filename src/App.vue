@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import EditTimerModal from "./components/EditTimerModal.vue";
 import StatsModal from "./components/StatsModal.vue";
+import { playChimeSound } from "./utils/audio.js";
 
 // State Timer Utama (default 25 menit)
 const hours = ref(0);
@@ -21,6 +22,22 @@ let timerInterval = null;
 const timeDisplay = computed(() => {
   const pad = (n) => String(n).padStart(2, "0");
   return `${pad(hours.value)}:${pad(minutes.value)}:${pad(seconds.value)}`;
+});
+
+// Perhitungan Detik & Animasi SVG Circular Progress Ring
+const currentTotalSeconds = computed(() => hours.value * 3600 + minutes.value * 60 + seconds.value);
+const baseTotalSeconds = computed(() => {
+  const base = savedHours.value * 3600 + savedMinutes.value * 60 + savedSeconds.value;
+  return base > 0 ? base : 1500;
+});
+
+const circleRadius = 88;
+const circleCircumference = 2 * Math.PI * circleRadius; // ~552.92
+
+const progressOffset = computed(() => {
+  if (baseTotalSeconds.value <= 0) return 0;
+  const ratio = currentTotalSeconds.value / baseTotalSeconds.value;
+  return circleCircumference * (1 - Math.max(0, Math.min(1, ratio)));
 });
 
 // State Modal Edit Timer & Statistik
@@ -60,6 +77,9 @@ async function handleTimerCompleted() {
   timerInterval = null;
   isRunning.value = false;
 
+  // Bunyikan dering lonceng / chime
+  playChimeSound();
+
   const duration = currentSessionDurationSeconds.value;
   currentSessionDurationSeconds.value = 0;
 
@@ -72,6 +92,7 @@ async function handleTimerCompleted() {
     }
   }
 }
+
 
 // Fungsi Play / Pause Countdown Timer
 function toggleTimer() {
@@ -188,10 +209,37 @@ async function handleSaveTimer(newTime) {
       <div 
         @click="showEditModal = true"
         title="Klik untuk mengubah timer"
-        class="group relative w-72 h-72 sm:w-84 sm:h-84 md:w-96 md:h-96 rounded-full border-[6px] border-[#2c2438] hover:border-[#433657] flex flex-col items-center justify-center cursor-pointer transition-colors"
+        class="group relative w-72 h-72 sm:w-84 sm:h-84 md:w-96 md:h-96 flex flex-col items-center justify-center cursor-pointer select-none"
       >
+        <!-- SVG Circular Progress Ring -->
+        <svg class="absolute inset-0 w-full h-full -rotate-90 pointer-events-none" viewBox="0 0 200 200">
+          <!-- Background Track Circle -->
+          <circle
+            cx="100"
+            cy="100"
+            :r="circleRadius"
+            fill="transparent"
+            stroke="#2c2438"
+            stroke-width="6"
+            class="group-hover:stroke-[#433657] transition-colors"
+          />
+          <!-- Foreground Animated Progress Circle -->
+          <circle
+            cx="100"
+            cy="100"
+            :r="circleRadius"
+            fill="transparent"
+            stroke="#d8b4e2"
+            stroke-width="6"
+            stroke-linecap="round"
+            :stroke-dasharray="circleCircumference"
+            :stroke-dashoffset="progressOffset"
+            class="transition-[stroke-dashoffset] duration-1000 ease-linear"
+          />
+        </svg>
+
         <!-- Timer Text -->
-        <span class="text-6xl sm:text-7xl font-light tracking-tight text-neutral-100 tabular-nums group-hover:scale-105 transition-transform">
+        <span class="relative z-10 text-6xl sm:text-7xl font-light tracking-tight text-neutral-100 tabular-nums group-hover:scale-105 transition-transform">
           {{ timeDisplay }}
         </span>
       </div>
