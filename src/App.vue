@@ -44,6 +44,19 @@ const progressOffset = computed(() => {
 const showEditModal = ref(false);
 const showStatsModal = ref(false);
 
+// State Mode Mini / Floating Window (Always on Top)
+const isMiniMode = ref(false);
+
+async function toggleMiniMode() {
+  try {
+    const nextState = !isMiniMode.value;
+    await invoke("set_mini_mode", { enabled: nextState });
+    isMiniMode.value = nextState;
+  } catch (err) {
+    console.error("Gagal mengubah mode mini:", err);
+  }
+}
+
 // Ambil data timer terakhir dari database SQLite saat aplikasi terbuka
 onMounted(async () => {
   try {
@@ -184,9 +197,84 @@ async function handleSaveTimer(newTime) {
 </script>
 
 <template>
-  <main class="min-h-screen w-full bg-[#1c1826] text-white flex flex-col justify-between items-center p-6 select-none font-sans relative">
-    <!-- Top Action Icon -->
-    <header class="w-full flex justify-end">
+  <!-- Mini Mode Layout (Always on Top) -->
+  <main 
+    v-if="isMiniMode" 
+    data-tauri-drag-region 
+    class="h-screen w-full bg-[#1c1826] text-white flex items-center justify-between px-3.5 select-none font-sans cursor-move overflow-hidden border border-[#2c2438]"
+  >
+    <!-- Left: Pin Status Indicator + Timer Text -->
+    <div class="flex items-center gap-2.5" data-tauri-drag-region>
+      <div class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" title="Always on Top aktif"></div>
+      <span class="text-2xl font-light tracking-tight text-neutral-100 tabular-nums">
+        {{ timeDisplay }}
+      </span>
+    </div>
+
+    <!-- Right: Mini Action Buttons -->
+    <div class="flex items-center gap-1.5" @mousedown.stop>
+      <!-- Play / Pause Button -->
+      <button
+        type="button"
+        @click="toggleTimer"
+        :title="isRunning ? 'Pause' : 'Start'"
+        class="w-7.5 h-7.5 rounded-full bg-[#d8b4e2] hover:bg-[#cb9ed6] active:scale-90 transition-all flex items-center justify-center shadow cursor-pointer text-black"
+      >
+        <svg v-if="isRunning" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4">
+          <path fill-rule="evenodd" d="M6.75 5.25a.75.75 0 0 1 .75.75v12a.75.75 0 0 1-1.5 0v-12a.75.75 0 0 1 .75-.75Zm10.5 0a.75.75 0 0 1 .75.75v12a.75.75 0 0 1-1.5 0v-12a.75.75 0 0 1 .75-.75Z" clip-rule="evenodd" />
+        </svg>
+        <svg v-else xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4 translate-x-0.5">
+          <path d="M5 3.868v16.264a1 1 0 0 0 1.545.841l12.443-8.132a1 1 0 0 0 0-1.682L6.545 3.027A1 1 0 0 0 5 3.868z" />
+        </svg>
+      </button>
+
+      <!-- Reset Button -->
+      <button
+        type="button"
+        @click="handleReset"
+        title="Reset Timer"
+        class="w-7.5 h-7.5 rounded-full bg-[#2c2438] hover:bg-[#382f48] active:scale-90 transition-all flex items-center justify-center text-[#9f94b0] hover:text-white cursor-pointer"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+      </button>
+
+      <!-- Return to Normal Mode Button -->
+      <button
+        type="button"
+        @click="toggleMiniMode"
+        title="Kembali ke Mode Normal"
+        class="w-7.5 h-7.5 rounded-full bg-[#2c2438] hover:bg-[#382f48] active:scale-90 transition-all flex items-center justify-center text-[#9f94b0] hover:text-white cursor-pointer"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="15 3 21 3 21 9" />
+          <polyline points="9 21 3 21 3 15" />
+          <line x1="21" x2="14" y1="3" y2="10" />
+          <line x1="3" x2="10" y1="21" y2="14" />
+        </svg>
+      </button>
+    </div>
+  </main>
+
+  <!-- Normal Mode Layout -->
+  <main v-else class="min-h-screen w-full bg-[#1c1826] text-white flex flex-col justify-between items-center p-6 select-none font-sans relative">
+    <!-- Top Action Icons -->
+    <header class="w-full flex justify-end gap-1">
+      <!-- Tombol Mode Mini / Floating (Always on Top) -->
+      <button 
+        type="button"
+        @click="toggleMiniMode"
+        title="Mode Mini (Always on Top)"
+        class="p-2.5 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10 active:scale-95 transition-all cursor-pointer"
+      >
+        <!-- Picture in Picture / Float Icon -->
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect width="18" height="18" x="3" y="3" rx="2" />
+          <rect width="7" height="6" x="12" y="13" rx="1" fill="currentColor" fill-opacity="0.2" />
+        </svg>
+      </button>
+
       <!-- Tombol Statistik Belajar -->
       <button 
         type="button"

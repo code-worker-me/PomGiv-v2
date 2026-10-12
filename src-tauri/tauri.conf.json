@@ -16,8 +16,8 @@
         "title": "pomgiv",
         "width": 460,
         "height": 600,
-        "minWidth": 460,
-        "minHeight": 600
+        "minWidth": 240,
+        "minHeight": 90
       }
     ],
     "security": {

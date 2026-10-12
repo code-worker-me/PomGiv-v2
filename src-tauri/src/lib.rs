@@ -1,7 +1,7 @@
 mod db;
 
 use std::sync::Mutex;
-use tauri::Manager;
+use tauri::{LogicalSize, Manager, Size};
 use tauri_plugin_notification::NotificationExt;
 
 pub struct DbState(pub Mutex<rusqlite::Connection>);
@@ -59,6 +59,30 @@ fn get_monthly_study_stats(
     db::get_monthly_stats(&conn, year, month).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn set_mini_mode(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        if enabled {
+            window.set_always_on_top(true).map_err(|e| e.to_string())?;
+            window
+                .set_min_size(Some(Size::Logical(LogicalSize::new(240.0, 90.0))))
+                .map_err(|e| e.to_string())?;
+            window
+                .set_size(Size::Logical(LogicalSize::new(300.0, 115.0)))
+                .map_err(|e| e.to_string())?;
+        } else {
+            window.set_always_on_top(false).map_err(|e| e.to_string())?;
+            window
+                .set_min_size(Some(Size::Logical(LogicalSize::new(460.0, 600.0))))
+                .map_err(|e| e.to_string())?;
+            window
+                .set_size(Size::Logical(LogicalSize::new(460.0, 600.0)))
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -80,7 +104,8 @@ pub fn run() {
             get_timer_settings,
             save_timer_settings,
             complete_study_session,
-            get_monthly_study_stats
+            get_monthly_study_stats,
+            set_mini_mode
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
