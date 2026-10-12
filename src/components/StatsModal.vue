@@ -1,58 +1,30 @@
 <script setup>
-import { ref, computed } from "vue";
+import { ref, computed, onMounted } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 
 const emit = defineEmits(["close"]);
 
-// Data Dummy Hardcoded Bulan Oktober (1 - 31)
-const currentMonthName = "Oktober 2026";
-const todayDate = 11;
+const monthNames = [
+  "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+  "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+];
 
-const monthlyData = ref([
-  { day: 1, minutes: 45 },
-  { day: 2, minutes: 75 },
-  { day: 3, minutes: 0 },
-  { day: 4, minutes: 25 },
-  { day: 5, minutes: 110 },
-  { day: 6, minutes: 60 },
-  { day: 7, minutes: 0 },
-  { day: 8, minutes: 30 },
-  { day: 9, minutes: 90 },
-  { day: 10, minutes: 135 },
-  { day: 11, minutes: 85 }, // Hari ini
-  { day: 12, minutes: 0 },
-  { day: 13, minutes: 0 },
-  { day: 14, minutes: 0 },
-  { day: 15, minutes: 0 },
-  { day: 16, minutes: 0 },
-  { day: 17, minutes: 0 },
-  { day: 18, minutes: 0 },
-  { day: 19, minutes: 0 },
-  { day: 20, minutes: 0 },
-  { day: 21, minutes: 0 },
-  { day: 22, minutes: 0 },
-  { day: 23, minutes: 0 },
-  { day: 24, minutes: 0 },
-  { day: 25, minutes: 0 },
-  { day: 26, minutes: 0 },
-  { day: 27, minutes: 0 },
-  { day: 28, minutes: 0 },
-  { day: 29, minutes: 0 },
-  { day: 30, minutes: 0 },
-  { day: 31, minutes: 0 },
-]);
+// State Data Statistik Dinamis dari SQLite
+const yearNumber = ref(new Date().getFullYear());
+const monthNumber = ref(new Date().getMonth() + 1);
+const todayDate = ref(new Date().getDate());
+const todayMinutes = ref(0);
+const totalMonthlyMinutes = ref(0);
+const monthlyData = ref([]);
+const selectedDay = ref(null);
+const isLoading = ref(true);
 
-// Tanggal yang sedang dipilih untuk melihat detail (default hari ini)
-const selectedDay = ref(monthlyData.value.find((d) => d.day === todayDate));
-
-// Hitung total menit hari ini
-const todayMinutes = computed(() => {
-  const item = monthlyData.value.find((d) => d.day === todayDate);
-  return item ? item.minutes : 0;
+const currentMonthName = computed(() => {
+  return `${monthNames[monthNumber.value - 1]} ${yearNumber.value}`;
 });
 
-// Hitung total menit bulan ini
-const totalMonthlyMinutes = computed(() => {
-  return monthlyData.value.reduce((acc, curr) => acc + curr.minutes, 0);
+const shortMonthName = computed(() => {
+  return monthNames[monthNumber.value - 1]?.substring(0, 3) || "";
 });
 
 // Format menit menjadi jam & menit
@@ -78,7 +50,6 @@ function getColorLevel(minutes) {
 function getBoxClass(dayItem) {
   const level = getColorLevel(dayItem.minutes);
   const isSelected = selectedDay.value?.day === dayItem.day;
-  const isToday = dayItem.day === todayDate;
 
   const colorClasses = {
     0: "bg-[#282233] text-neutral-400 hover:bg-[#342c43]",
@@ -90,9 +61,29 @@ function getBoxClass(dayItem) {
 
   return [
     colorClasses[level],
-    isSelected ? "opacity-100" : "opacity-90 hover:opacity-100",
+    isSelected ? "opacity-100 scale-105 z-10" : "opacity-90 hover:opacity-100",
   ];
 }
+
+// Muat data statistik riil dari database SQLite di Rust
+onMounted(async () => {
+  try {
+    const res = await invoke("get_monthly_study_stats");
+    if (res) {
+      yearNumber.value = res.year;
+      monthNumber.value = res.month;
+      todayDate.value = res.today_day;
+      todayMinutes.value = res.today_minutes;
+      totalMonthlyMinutes.value = res.total_month_minutes;
+      monthlyData.value = res.daily_stats;
+      selectedDay.value = res.daily_stats.find((d) => d.day === res.today_day) || res.daily_stats[0];
+    }
+  } catch (err) {
+    console.error("Gagal mengambil statistik belajar dari SQLite:", err);
+  } finally {
+    isLoading.value = false;
+  }
+});
 </script>
 
 <template>
@@ -135,20 +126,20 @@ function getBoxClass(dayItem) {
         <div class="bg-[#18181b] border border-neutral-800/80 rounded-lg p-3 flex flex-col">
           <span class="text-[11px] font-medium text-neutral-400 uppercase tracking-wider">Hari Ini</span>
           <span class="text-xl font-bold text-[#d8b4e2] mt-0.5">{{ formatDuration(todayMinutes) }}</span>
-          <span class="text-[10px] text-neutral-400 mt-0.5">Tgl {{ todayDate }} Okt</span>
+          <span class="text-[10px] text-neutral-400 mt-0.5">Tgl {{ todayDate }} {{ shortMonthName }}</span>
         </div>
 
         <div class="bg-[#18181b] border border-neutral-800/80 rounded-lg p-3 flex flex-col">
           <span class="text-[11px] font-medium text-neutral-400 uppercase tracking-wider">Bulan Ini</span>
           <span class="text-xl font-bold text-neutral-100 mt-0.5">{{ formatDuration(totalMonthlyMinutes) }}</span>
-          <span class="text-[10px] text-neutral-400 mt-0.5">31 hari total</span>
+          <span class="text-[10px] text-neutral-400 mt-0.5">{{ monthlyData.length }} hari total</span>
         </div>
       </div>
 
       <!-- Detail Tanggal yang Dipilih -->
       <div class="bg-[#18181b] border border-neutral-800/80 rounded-lg px-3 py-2 flex items-center justify-between text-xs">
         <span class="text-neutral-300">
-          Tanggal <strong class="text-white">{{ selectedDay?.day }} Okt</strong>:
+          Tanggal <strong class="text-white">{{ selectedDay?.day }} {{ shortMonthName }}</strong>:
         </span>
         <span class="font-semibold text-[#d8b4e2]">
           {{ selectedDay?.minutes > 0 ? `${selectedDay.minutes} menit (${formatDuration(selectedDay.minutes)})` : 'Tidak ada aktivitas' }}

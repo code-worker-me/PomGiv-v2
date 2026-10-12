@@ -49,6 +49,16 @@ fn complete_study_session(
     Ok(true)
 }
 
+#[tauri::command]
+fn get_monthly_study_stats(
+    state: tauri::State<DbState>,
+    year: Option<u32>,
+    month: Option<u32>,
+) -> Result<db::MonthlyStudySummary, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    db::get_monthly_stats(&conn, year, month).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -69,7 +79,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_timer_settings,
             save_timer_settings,
-            complete_study_session
+            complete_study_session,
+            get_monthly_study_stats
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
