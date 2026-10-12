@@ -28,10 +28,13 @@ rusqlite = { version = "0.33", features = ["bundled"] }
 sysinfo = "0.33"
 
 
+[profile.dev]
+incremental = true # Compile binary in smaller steps during development
+
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
 codegen-units = 1
 lto = true
-opt-level = 3
+opt-level = "s"
 panic = "abort"
 strip = true
