@@ -4,6 +4,10 @@ import { invoke } from "@tauri-apps/api/core";
 import EditTimerModal from "./components/EditTimerModal.vue";
 import StatsModal from "./components/StatsModal.vue";
 import { playChimeSound, stopChimeSound } from "./utils/audio.js";
+import floatIcon from "./assets/float-icon.vue";
+import barChartIcon from "./assets/barchart-icon.vue"
+import SmallButton from "./components/SmallButton.vue";
+import circleIcon from "./assets/circle-icon.vue";
 
 // State Timer Utama (default 25 menit)
 const hours = ref(0);
@@ -83,6 +87,10 @@ onUnmounted(() => {
 
 // State Waktu Sesi Berjalan (dalam detik)
 const currentSessionDurationSeconds = ref(0);
+const elapsedSeconds = ref(0);
+
+// Tombol Stop hanya muncul jika sesi berjalan minimal 5 menit (300 detik)
+const canShowStopButton = computed(() => elapsedSeconds.value >= 300);
 
 // State Notifikasi Toast In-App dengan Tombol Dismiss
 const showNotificationToast = ref(false);
@@ -109,6 +117,7 @@ async function handleTimerCompleted() {
 
   const duration = currentSessionDurationSeconds.value;
   currentSessionDurationSeconds.value = 0;
+  elapsedSeconds.value = 0;
 
   // Validasi ketat: HANYA simpan ke database dan munculkan notifikasi jika durasi LEBIH DARI 1 MENIT (> 60 detik)
   if (duration > 60) {
@@ -130,7 +139,6 @@ async function handleTimerCompleted() {
     }
   }
 }
-
 
 // Fungsi Play / Pause Countdown Timer
 function toggleTimer() {
@@ -160,6 +168,8 @@ function toggleTimer() {
 
     isRunning.value = true;
     timerInterval = setInterval(() => {
+      elapsedSeconds.value++;
+
       if (seconds.value > 0) {
         seconds.value--;
       } else if (minutes.value > 0) {
@@ -177,6 +187,45 @@ function toggleTimer() {
   }
 }
 
+// Fungsi Stop Timer sebelum waktu habis (hanya berlaku jika sesi >= 5 menit)
+async function handleStopTimer() {
+  if (timerInterval) {
+    clearInterval(timerInterval);
+    timerInterval = null;
+  }
+  isRunning.value = false;
+
+  const duration = elapsedSeconds.value;
+  elapsedSeconds.value = 0;
+  currentSessionDurationSeconds.value = 0;
+
+  // Kembalikan display timer ke waktu awal tersimpan
+  hours.value = savedHours.value;
+  minutes.value = savedMinutes.value;
+  seconds.value = savedSeconds.value;
+
+  // Simpan ke database jika memenuhi syarat minimal 5 menit (300 detik)
+  if (duration >= 300) {
+    playChimeSound();
+
+    const mins = Math.floor(duration / 60);
+    notificationMinutes.value = mins;
+    showNotificationToast.value = true;
+
+    if (notificationTimeout) clearTimeout(notificationTimeout);
+    notificationTimeout = setTimeout(() => {
+      showNotificationToast.value = false;
+      notificationTimeout = null;
+    }, 12000);
+
+    try {
+      await invoke("complete_study_session", { durationSeconds: duration });
+    } catch (err) {
+      console.error("Gagal mencatat sesi belajar dari tombol stop:", err);
+    }
+  }
+}
+
 // Fungsi Reset Timer ke waktu awal
 function handleReset() {
   if (timerInterval) {
@@ -185,6 +234,7 @@ function handleReset() {
   }
   isRunning.value = false;
   currentSessionDurationSeconds.value = 0;
+  elapsedSeconds.value = 0;
   hours.value = savedHours.value;
   minutes.value = savedMinutes.value;
   seconds.value = savedSeconds.value;
@@ -199,7 +249,7 @@ async function handleSaveTimer(newTime) {
   }
   isRunning.value = false;
   currentSessionDurationSeconds.value = 0;
-
+  elapsedSeconds.value = 0;
 
   hours.value = newTime.hours;
   minutes.value = newTime.minutes;
@@ -223,13 +273,13 @@ async function handleSaveTimer(newTime) {
 
 <template>
   <!-- Mini Mode Layout (Always on Top) -->
-  <main 
-    v-if="isMiniMode" 
-    data-tauri-drag-region 
+  <main
+    v-if="isMiniMode"
+    data-tauri-drag-region
     class="h-screen w-full bg-[#1c1826] text-white flex items-center justify-between px-3.5 select-none font-sans cursor-move overflow-hidden border border-[#2c2438] relative"
   >
     <!-- Overlay Notifikasi di Mode Mini jika aktif -->
-    <div 
+    <div
       v-if="showNotificationToast"
       class="absolute inset-0 bg-[#251e33] z-50 flex items-center justify-between px-3 border border-[#d8b4e2]/40"
       data-tauri-drag-region
@@ -264,12 +314,7 @@ async function handleSaveTimer(newTime) {
         :title="isRunning ? 'Pause' : 'Start'"
         class="w-7.5 h-7.5 rounded-full bg-[#d8b4e2] hover:bg-[#cb9ed6] active:scale-90 transition-all flex items-center justify-center shadow cursor-pointer text-black"
       >
-        <svg v-if="isRunning" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4">
-          <path fill-rule="evenodd" d="M6.75 5.25a.75.75 0 0 1 .75.75v12a.75.75 0 0 1-1.5 0v-12a.75.75 0 0 1 .75-.75Zm10.5 0a.75.75 0 0 1 .75.75v12a.75.75 0 0 1-1.5 0v-12a.75.75 0 0 1 .75-.75Z" clip-rule="evenodd" />
-        </svg>
-        <svg v-else xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4 translate-x-0.5">
-          <path d="M5 3.868v16.264a1 1 0 0 0 1.545.841l12.443-8.132a1 1 0 0 0 0-1.682L6.545 3.027A1 1 0 0 0 5 3.868z" />
-        </svg>
+        <pauseIcon :value="isRunning" />
       </button>
 
       <!-- Reset Button -->
@@ -303,113 +348,32 @@ async function handleSaveTimer(newTime) {
 
   <!-- Normal Mode Layout -->
   <main v-else class="min-h-screen w-full bg-[#1c1826] text-white flex flex-col justify-between items-center p-6 select-none font-sans relative">
-    <!-- In-App Notification Toast (dengan Tombol Dismiss) -->
-    <transition
-      enter-active-class="transition duration-300 ease-out"
-      enter-from-class="opacity-0 -translate-y-4 scale-95"
-      enter-to-class="opacity-100 translate-y-0 scale-100"
-      leave-active-class="transition duration-200 ease-in"
-      leave-from-class="opacity-100 translate-y-0 scale-100"
-      leave-to-class="opacity-0 -translate-y-2 scale-95"
-    >
-      <div 
-        v-if="showNotificationToast" 
-        class="absolute top-4 left-4 right-4 z-50 bg-[#251e33] border border-[#d8b4e2]/30 shadow-2xl rounded-xl p-3 flex items-center justify-between gap-3 text-white backdrop-blur-md"
-      >
-        <div class="flex items-center gap-3 min-w-0">
-          <div class="w-8 h-8 rounded-full bg-[#d8b4e2]/20 text-[#d8b4e2] flex items-center justify-center shrink-0">
-            <!-- Bell Icon -->
-            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
-              <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
-            </svg>
-          </div>
-          <div class="flex flex-col min-w-0">
-            <span class="text-xs font-semibold text-neutral-100 leading-tight truncate">Waktu Selesai! 🎉</span>
-            <span class="text-[11px] text-[#b3a8c5] leading-tight truncate">Sesi belajar {{ notificationMinutes }} menit selesai</span>
-          </div>
-        </div>
-
-        <!-- Tombol Dismiss -->
-        <button
-          type="button"
-          @click="dismissNotification"
-          class="shrink-0 px-3 py-1.5 rounded-lg bg-[#382c4a] hover:bg-[#47385e] active:scale-95 text-xs font-medium text-neutral-200 hover:text-white border border-white/5 transition-all cursor-pointer flex items-center gap-1.5"
-        >
-          <span>Dismiss</span>
-          <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
-      </div>
-    </transition>
     <!-- Top Action Icons -->
     <header class="w-full flex justify-end gap-1">
       <!-- Tombol Mode Mini / Floating (Always on Top) -->
-      <button 
-        type="button"
-        @click="toggleMiniMode"
-        title="Mode Mini (Always on Top)"
-        class="p-2.5 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10 active:scale-95 transition-all cursor-pointer"
-      >
-        <!-- Picture in Picture / Float Icon -->
-        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect width="18" height="18" x="3" y="3" rx="2" />
-          <rect width="7" height="6" x="12" y="13" rx="1" fill="currentColor" fill-opacity="0.2" />
-        </svg>
-      </button>
+      <SmallButton @click="toggleMiniMode" title="Mode Mini (Always on Top)">
+          <floatIcon />
+      </SmallButton>
 
       <!-- Tombol Statistik Belajar -->
-      <button 
-        type="button"
-        @click="showStatsModal = true"
-        title="Statistik Belajar"
-        class="p-2.5 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10 active:scale-95 transition-all cursor-pointer"
-      >
-        <!-- Bar Chart / Statistics Icon -->
-        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M3 3v18h18" />
-          <path d="M18 17V9" />
-          <path d="M13 17V5" />
-          <path d="M8 17v-3" />
-        </svg>
-      </button>
+      <SmallButton @click="showStatsModal = true" title="Statistik Belajar">
+          <barChartIcon />
+      </SmallButton>
     </header>
 
     <!-- Center Section: Circular Timer Ring (Klik untuk edit) -->
     <section class="flex flex-col items-center justify-center my-auto">
-      <div 
+      <div
         @click="showEditModal = true"
         title="Klik untuk mengubah timer"
         class="group relative w-72 h-72 sm:w-84 sm:h-84 md:w-96 md:h-96 flex flex-col items-center justify-center cursor-pointer select-none"
       >
         <!-- SVG Circular Progress Ring -->
-        <svg class="absolute inset-0 w-full h-full -rotate-90 pointer-events-none" viewBox="0 0 200 200">
-          <!-- Background Track Circle -->
-          <circle
-            cx="100"
-            cy="100"
-            :r="circleRadius"
-            fill="transparent"
-            stroke="#2c2438"
-            stroke-width="6"
-            class="group-hover:stroke-[#433657] transition-colors"
-          />
-          <!-- Foreground Animated Progress Circle -->
-          <circle
-            cx="100"
-            cy="100"
-            :r="circleRadius"
-            fill="transparent"
-            stroke="#d8b4e2"
-            stroke-width="6"
-            stroke-linecap="round"
-            :stroke-dasharray="circleCircumference"
-            :stroke-dashoffset="progressOffset"
-            class="transition-[stroke-dashoffset] duration-1000 ease-linear"
-          />
-        </svg>
+        <circleIcon
+        :circleRadius="circleRadius"
+        :circleCircumference="circleCircumference"
+        :progressOffset="progressOffset"
+        />
 
         <!-- Timer Text -->
         <span class="relative z-10 text-6xl sm:text-7xl font-light tracking-tight text-neutral-100 tabular-nums group-hover:scale-105 transition-transform">
@@ -435,6 +399,21 @@ async function handleSaveTimer(newTime) {
         <svg v-else xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-7 h-7 text-black translate-x-0.5">
           <path d="M5 3.868v16.264a1 1 0 0 0 1.545.841l12.443-8.132a1 1 0 0 0 0-1.682L6.545 3.027A1 1 0 0 0 5 3.868z" />
         </svg>
+      </button>
+
+      <!-- Stop Button -->
+      <!-- After 5 minutes button will show -->
+      <!-- user can either stop pomodoro and get counted to statistik or continue untuk finish -->
+      <button
+        v-if="canShowStopButton"
+        type="button"
+        @click="handleStopTimer"
+        aria-label="Stop Timer"
+        class="w-16 h-16 rounded-full bg-[#E11A45] hover:bg-[#800020] active:scale-95 transition-all flex items-center justify-center text-[#9f94b0] hover:text-white cursor-pointer"
+      >
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="square" stroke-linejoin="miter" d="M3 3h7v7H3zM14 14h7v7h-7z" />
+          </svg>
       </button>
 
       <!-- Reset / Restart Button -->
@@ -467,7 +446,3 @@ async function handleSaveTimer(newTime) {
     />
   </main>
 </template>
-
-
-
-
