@@ -11,6 +11,19 @@ pub struct TimerSettings {
     pub seconds: u32,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Activity {
+    pub id: i64,
+    pub title: String,
+    pub is_checked: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ActivitySummaryItem {
+    pub title: String,
+    pub duration_seconds: u32,
+}
+
 pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, Box<dyn std::error::Error>> {
     let app_dir: PathBuf = app_handle.path().app_data_dir()?;
     if !app_dir.exists() {
@@ -41,6 +54,38 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, Box<dyn std:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             duration_seconds INTEGER NOT NULL,
             completed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )",
+        [],
+    )?;
+
+    // Migrasi aman: Tambah kolom activity_title jika belum ada di tabel study_sessions
+    let has_activity_title = {
+        let mut stmt = conn.prepare("PRAGMA table_info(study_sessions)")?;
+        let column_rows = stmt.query_map([], |row| {
+            let name: String = row.get(1)?;
+            Ok(name)
+        })?;
+        let mut found = false;
+        for col_name in column_rows.flatten() {
+            if col_name == "activity_title" {
+                found = true;
+                break;
+            }
+        }
+        found
+    };
+
+    if !has_activity_title {
+        conn.execute("ALTER TABLE study_sessions ADD COLUMN activity_title TEXT", [])?;
+    }
+
+    // Tabel untuk menyimpan daftar aktivitas harian
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS activities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            is_checked INTEGER NOT NULL DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )",
         [],
     )?;
@@ -76,13 +121,93 @@ pub fn save_settings(conn: &Connection, hours: u32, minutes: u32, seconds: u32) 
     Ok(())
 }
 
-pub fn log_study_session(conn: &Connection, duration_seconds: u32) -> Result<()> {
+pub fn log_study_session(
+    conn: &Connection,
+    duration_seconds: u32,
+    activity_title: Option<String>,
+) -> Result<()> {
     conn.execute(
-        "INSERT INTO study_sessions (duration_seconds, completed_at) VALUES (?1, CURRENT_TIMESTAMP)",
-        params![duration_seconds],
+        "INSERT INTO study_sessions (duration_seconds, activity_title, completed_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)",
+        params![duration_seconds, activity_title],
     )?;
 
     Ok(())
+}
+
+pub fn get_activities(conn: &Connection) -> Result<Vec<Activity>> {
+    let mut stmt = conn.prepare("SELECT id, title, is_checked FROM activities ORDER BY id ASC")?;
+    let rows = stmt.query_map([], |row| {
+        let is_checked_int: i64 = row.get(2)?;
+        Ok(Activity {
+            id: row.get(0)?,
+            title: row.get(1)?,
+            is_checked: is_checked_int != 0,
+        })
+    })?;
+
+    let mut list = Vec::new();
+    for item in rows {
+        list.push(item?);
+    }
+    Ok(list)
+}
+
+pub fn add_activity(conn: &Connection, title: &str) -> Result<Activity> {
+    conn.execute(
+        "INSERT INTO activities (title, is_checked) VALUES (?1, 0)",
+        params![title],
+    )?;
+    let id = conn.last_insert_rowid();
+    Ok(Activity {
+        id,
+        title: title.to_string(),
+        is_checked: false,
+    })
+}
+
+pub fn update_activity_checked(conn: &Connection, id: i64, is_checked: bool) -> Result<()> {
+    let val: i64 = if is_checked { 1 } else { 0 };
+    conn.execute(
+        "UPDATE activities SET is_checked = ?1 WHERE id = ?2",
+        params![val, id],
+    )?;
+    Ok(())
+}
+
+pub fn delete_activity(conn: &Connection, id: i64) -> Result<()> {
+    conn.execute("DELETE FROM activities WHERE id = ?1", params![id])?;
+    Ok(())
+}
+
+pub fn get_daily_activity_summary(
+    conn: &Connection,
+    year: u32,
+    month: u32,
+    day: u32,
+) -> Result<Vec<ActivitySummaryItem>> {
+    let date_str = format!("{}-{:02}-{:02}", year, month, day);
+    let mut stmt = conn.prepare(
+        "SELECT activity_title, SUM(duration_seconds) as total_seconds
+         FROM study_sessions
+         WHERE strftime('%Y-%m-%d', completed_at, 'localtime') = ?1
+           AND activity_title IS NOT NULL
+           AND TRIM(activity_title) != ''
+         GROUP BY activity_title
+         ORDER BY total_seconds DESC",
+    )?;
+
+    let rows = stmt.query_map(params![date_str], |row| {
+        Ok(ActivitySummaryItem {
+            title: row.get(0)?,
+            duration_seconds: row.get(1)?,
+        })
+    })?;
+
+    let mut list = Vec::new();
+    for item in rows {
+        list.push(item?);
+    }
+    Ok(list)
 }
 
 use std::collections::HashMap;

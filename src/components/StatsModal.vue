@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, watch, onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 
 const emit = defineEmits(["close"]);
@@ -19,6 +19,10 @@ const monthlyData = ref([]);
 const selectedDay = ref(null);
 const isLoading = ref(true);
 
+// State Activity Summary untuk hari terpilih
+const activitySummaries = ref([]);
+const isLoadingActivities = ref(false);
+
 const currentMonthName = computed(() => {
   return `${monthNames[monthNumber.value - 1]} ${yearNumber.value}`;
 });
@@ -36,6 +40,42 @@ function formatDuration(minutes) {
   if (h > 0) return `${h} jam`;
   return `${m} menit`;
 }
+
+// Format durasi detik untuk Activity Summary: (1h 5m) atau (25m)
+function formatActivityDuration(seconds) {
+  const totalMins = Math.floor(seconds / 60);
+  const h = Math.floor(totalMins / 60);
+  const m = totalMins % 60;
+  if (h > 0 && m > 0) return `${h}h ${m}m`;
+  if (h > 0) return `${h}h`;
+  return `${m}m`;
+}
+
+// Mengambil data ringkasan aktivitas harian dari SQLite
+async function fetchDailyActivities(day) {
+  if (!day) return;
+  isLoadingActivities.value = true;
+  try {
+    const list = await invoke("get_daily_activity_summary", {
+      year: yearNumber.value,
+      month: monthNumber.value,
+      day: day,
+    });
+    activitySummaries.value = list || [];
+  } catch (err) {
+    console.error("Gagal mengambil ringkasan aktivitas harian:", err);
+    activitySummaries.value = [];
+  } finally {
+    isLoadingActivities.value = false;
+  }
+}
+
+// Pantau perubahan selectedDay untuk memuat activity summary
+watch(selectedDay, (newVal) => {
+  if (newVal) {
+    fetchDailyActivities(newVal.day);
+  }
+});
 
 // Menentukan tingkat warna gradasi berdasarkan menit (0 - 4)
 function getColorLevel(minutes) {
@@ -76,7 +116,11 @@ onMounted(async () => {
       todayMinutes.value = res.today_minutes;
       totalMonthlyMinutes.value = res.total_month_minutes;
       monthlyData.value = res.daily_stats;
-      selectedDay.value = res.daily_stats.find((d) => d.day === res.today_day) || res.daily_stats[0];
+      const defaultDay = res.daily_stats.find((d) => d.day === res.today_day) || res.daily_stats[0];
+      selectedDay.value = defaultDay;
+      if (defaultDay) {
+        fetchDailyActivities(defaultDay.day);
+      }
     }
   } catch (err) {
     console.error("Gagal mengambil statistik belajar dari SQLite:", err);
@@ -91,7 +135,7 @@ onMounted(async () => {
     class="fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px] flex items-center justify-center p-3 select-none"
     @click.self="emit('close')"
   >
-    <div class="bg-[#1f1f23] border border-neutral-800/80 rounded-xl w-full max-w-97.5 p-5 shadow-2xl flex flex-col gap-4 text-neutral-100 animate-in fade-in zoom-in-95 duration-150">
+    <div class="bg-[#1f1f23] border border-neutral-800/80 rounded-xl w-full max-w-97.5 max-h-[92vh] overflow-y-auto p-5 shadow-2xl flex flex-col gap-3.5 text-neutral-100 animate-in fade-in zoom-in-95 duration-150">
       <!-- Header Modal -->
       <div class="flex items-center justify-between pb-1 border-b border-neutral-800">
         <div>
@@ -144,6 +188,42 @@ onMounted(async () => {
         <span class="font-semibold text-[#d8b4e2]">
           {{ selectedDay?.minutes > 0 ? `${selectedDay.minutes} menit (${formatDuration(selectedDay.minutes)})` : 'Tidak ada aktivitas' }}
         </span>
+      </div>
+
+      <!-- Activity Summary (Daily Log) untuk Hari yang Dipilih -->
+      <div class="bg-[#18181b] border border-neutral-800/80 rounded-lg p-3 flex flex-col gap-2">
+        <div class="flex items-center justify-between border-b border-neutral-800/60 pb-1.5">
+          <span class="text-[11px] font-semibold text-neutral-300 uppercase tracking-wider flex items-center gap-1.5">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 text-[#d8b4e2]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="16" y1="13" x2="8" y2="13" />
+              <line x1="16" y1="17" x2="8" y2="17" />
+              <polyline points="10 9 9 9 8 9" />
+            </svg>
+            Activity Summary
+          </span>
+          <span class="text-[10px] text-neutral-400">Tgl {{ selectedDay?.day }} {{ shortMonthName }}</span>
+        </div>
+
+        <div v-if="isLoadingActivities" class="text-xs text-neutral-500 py-1 italic">
+          Memuat aktivitas...
+        </div>
+
+        <div v-else-if="activitySummaries.length > 0" class="flex flex-col gap-1 max-h-28 overflow-y-auto pr-1">
+          <div
+            v-for="(item, idx) in activitySummaries"
+            :key="idx"
+            class="text-xs text-neutral-200 flex items-start gap-1.5 py-0.5"
+          >
+            <span class="text-[#d8b4e2] font-semibold shrink-0">- ({{ formatActivityDuration(item.duration_seconds) }})</span>
+            <span class="break-words">{{ item.title }}</span>
+          </div>
+        </div>
+
+        <div v-else class="text-[11px] text-neutral-500 italic py-0.5">
+          Tidak ada catatan aktivitas khusus pada tanggal ini.
+        </div>
       </div>
 
       <!-- Kalender Heatmap Grid (~31 Kotak) -->

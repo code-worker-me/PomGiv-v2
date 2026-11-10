@@ -4,6 +4,8 @@ import { invoke } from "@tauri-apps/api/core";
 import EditTimerModal from "./components/EditTimerModal.vue";
 import StatsModal from "./components/StatsModal.vue";
 import MiniMode from "./components/MiniMode.vue";
+import DailyActivitiesPanel from "./components/DailyActivitiesPanel.vue";
+import SelectActivityModal from "./components/SelectActivityModal.vue";
 import { playChimeSound, stopChimeSound } from "./utils/audio.js";
 import floatIcon from "./assets/float-icon.vue";
 import barChartIcon from "./assets/barchart-icon.vue"
@@ -22,6 +24,53 @@ const savedSeconds = ref(0);
 
 const isRunning = ref(false);
 let timerInterval = null;
+
+// State Aktivitas Harian
+const activities = ref([]);
+const showSelectActivityModal = ref(false);
+const pendingSessionDuration = ref(0);
+
+// Ambil daftar aktivitas dari database SQLite
+async function loadActivities() {
+  try {
+    const list = await invoke("get_activities");
+    if (list) {
+      activities.value = list;
+    }
+  } catch (err) {
+    console.error("Gagal mengambil data aktivitas dari SQLite:", err);
+  }
+}
+
+async function handleAddActivity(title) {
+  try {
+    const newAct = await invoke("add_activity", { title });
+    if (newAct) {
+      activities.value.push(newAct);
+    }
+  } catch (err) {
+    console.error("Gagal menambah aktivitas:", err);
+  }
+}
+
+async function handleToggleActivity(item) {
+  try {
+    const nextVal = !item.is_checked;
+    await invoke("update_activity_checked", { id: item.id, isChecked: nextVal });
+    item.is_checked = nextVal;
+  } catch (err) {
+    console.error("Gagal mengubah status aktivitas:", err);
+  }
+}
+
+async function handleDeleteActivity(id) {
+  try {
+    await invoke("delete_activity", { id });
+    activities.value = activities.value.filter((a) => a.id !== id);
+  } catch (err) {
+    console.error("Gagal menghapus aktivitas:", err);
+  }
+}
 
 // Format waktu 00:00:00
 const timeDisplay = computed(() => {
@@ -86,6 +135,9 @@ onMounted(async () => {
   } catch (err) {
     console.error("Gagal mengambil data timer dari SQLite:", err);
   }
+
+  // Muat aktivitas harian
+  await loadActivities();
 });
 
 // Bersihkan interval saat komponen dilepas
@@ -116,14 +168,67 @@ function dismissNotification() {
   stopChimeSound();
 }
 
+// Finalisasi dan simpan sesi ke database SQLite
+async function finalizeSession(duration, activityTitle = null) {
+  playChimeSound();
+
+  const mins = Math.floor(duration / 60);
+  notificationMinutes.value = mins;
+  showNotificationToast.value = true;
+
+  if (notificationTimeout) clearTimeout(notificationTimeout);
+  notificationTimeout = setTimeout(() => {
+    showNotificationToast.value = false;
+    notificationTimeout = null;
+  }, 12000);
+
+  try {
+    await invoke("complete_study_session", {
+      durationSeconds: duration,
+      activityTitle: activityTitle || null,
+    });
+  } catch (err) {
+    console.error("Gagal mencatat sesi belajar dan notifikasi:", err);
+  }
+}
+
+// Pemrosesan seleksi aktivitas sebelum sesi difinalisasi
+function processSessionCompletion(duration) {
+  const checked = activities.value.filter((a) => a.is_checked);
+
+  if (checked.length === 0) {
+    finalizeSession(duration, null);
+  } else if (checked.length === 1) {
+    finalizeSession(duration, checked[0].title);
+  } else {
+    pendingSessionDuration.value = duration;
+    showSelectActivityModal.value = true;
+  }
+}
+
+function handleSelectActivity(title) {
+  showSelectActivityModal.value = false;
+  finalizeSession(pendingSessionDuration.value, title);
+  pendingSessionDuration.value = 0;
+}
+
+function handleSkipSelectActivity() {
+  showSelectActivityModal.value = false;
+  finalizeSession(pendingSessionDuration.value, null);
+  pendingSessionDuration.value = 0;
+}
+
+function handleCloseSelectActivity() {
+  showSelectActivityModal.value = false;
+  finalizeSession(pendingSessionDuration.value, null);
+  pendingSessionDuration.value = 0;
+}
+
 // Fungsi Ketika Waktu Timer Habis
 async function handleTimerCompleted() {
   clearInterval(timerInterval);
   timerInterval = null;
   isRunning.value = false;
-
-  // Bunyikan dering lonceng / chime berprioritas tinggi & audio ducking
-  playChimeSound();
 
   const duration = currentSessionDurationSeconds.value;
   currentSessionDurationSeconds.value = 0;
@@ -131,22 +236,7 @@ async function handleTimerCompleted() {
 
   // Validasi ketat: HANYA simpan ke database dan munculkan notifikasi jika durasi LEBIH DARI 1 MENIT (> 60 detik)
   if (duration > 60) {
-    const mins = Math.floor(duration / 60);
-    notificationMinutes.value = mins;
-    showNotificationToast.value = true;
-
-    // Auto-dismiss toast setelah 12 detik jika tidak ditekan manual
-    if (notificationTimeout) clearTimeout(notificationTimeout);
-    notificationTimeout = setTimeout(() => {
-      showNotificationToast.value = false;
-      notificationTimeout = null;
-    }, 12000);
-
-    try {
-      await invoke("complete_study_session", { durationSeconds: duration });
-    } catch (err) {
-      console.error("Gagal mencatat sesi belajar dan notifikasi:", err);
-    }
+    processSessionCompletion(duration);
   }
 }
 
@@ -216,23 +306,7 @@ async function handleStopTimer() {
 
   // Simpan ke database jika memenuhi syarat minimal 5 menit (300 detik)
   if (duration >= 300) {
-    playChimeSound();
-
-    const mins = Math.floor(duration / 60);
-    notificationMinutes.value = mins;
-    showNotificationToast.value = true;
-
-    if (notificationTimeout) clearTimeout(notificationTimeout);
-    notificationTimeout = setTimeout(() => {
-      showNotificationToast.value = false;
-      notificationTimeout = null;
-    }, 12000);
-
-    try {
-      await invoke("complete_study_session", { durationSeconds: duration });
-    } catch (err) {
-      console.error("Gagal mencatat sesi belajar dari tombol stop:", err);
-    }
+    processSessionCompletion(duration);
   }
 }
 
@@ -338,6 +412,16 @@ async function handleSaveTimer(newTime) {
       </div>
     </section>
 
+    <!-- Collapsible Daily Activities Panel -->
+    <section class="w-full flex justify-center px-4 my-2 z-20">
+      <DailyActivitiesPanel
+        :activities="activities"
+        @add="handleAddActivity"
+        @toggle="handleToggleActivity"
+        @delete="handleDeleteActivity"
+      />
+    </section>
+
     <!-- Bottom Controls -->
     <footer class="flex items-center justify-center gap-5 pb-6">
       <!-- Play / Pause Button -->
@@ -399,6 +483,16 @@ async function handleSaveTimer(newTime) {
     <StatsModal
       v-if="showStatsModal"
       @close="showStatsModal = false"
+    />
+
+    <!-- MODAL PILIH AKTIVITAS (Jika >1 aktivitas tercentang saat selesai) -->
+    <SelectActivityModal
+      v-if="showSelectActivityModal"
+      :activities="activities.filter((a) => a.is_checked)"
+      :duration-seconds="pendingSessionDuration"
+      @select="handleSelectActivity"
+      @skip="handleSkipSelectActivity"
+      @close="handleCloseSelectActivity"
     />
   </main>
 </template>

@@ -36,6 +36,7 @@ fn complete_study_session(
     app: tauri::AppHandle,
     state: tauri::State<DbState>,
     duration_seconds: u32,
+    activity_title: Option<String>,
 ) -> Result<bool, String> {
     // Validasi ketat: HANYA jika durasi lebih dari 1 menit (> 60 detik)
     if duration_seconds <= 60 {
@@ -44,17 +45,63 @@ fn complete_study_session(
 
     // 1. Simpan ke SQLite
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    db::log_study_session(&conn, duration_seconds).map_err(|e| e.to_string())?;
+    db::log_study_session(&conn, duration_seconds, activity_title.clone()).map_err(|e| e.to_string())?;
 
     // 2. Munculkan notifikasi Windows
     let minutes = duration_seconds / 60;
+    let body = match &activity_title {
+        Some(title) if !title.trim().is_empty() => {
+            format!("Selamat! Sesi belajar '{}' selama {} menit telah selesai.", title, minutes)
+        }
+        _ => format!("Selamat! Sesi belajar selama {} menit telah selesai.", minutes),
+    };
+
     let _ = app.notification()
         .builder()
         .title("Waktu Belajar Selesai! 🎉")
-        .body(format!("Selamat! Sesi belajar selama {} menit telah selesai.", minutes))
+        .body(body)
         .show();
 
     Ok(true)
+}
+
+#[tauri::command]
+fn get_activities(state: tauri::State<DbState>) -> Result<Vec<db::Activity>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    db::get_activities(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn add_activity(state: tauri::State<DbState>, title: String) -> Result<db::Activity, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    db::add_activity(&conn, &title).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn update_activity_checked(
+    state: tauri::State<DbState>,
+    id: i64,
+    is_checked: bool,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    db::update_activity_checked(&conn, id, is_checked).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_activity(state: tauri::State<DbState>, id: i64) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    db::delete_activity(&conn, id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_daily_activity_summary(
+    state: tauri::State<DbState>,
+    year: u32,
+    month: u32,
+    day: u32,
+) -> Result<Vec<db::ActivitySummaryItem>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    db::get_daily_activity_summary(&conn, year, month, day).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -170,7 +217,12 @@ pub fn run() {
             complete_study_session,
             get_monthly_study_stats,
             set_mini_mode,
-            get_app_metrics
+            get_app_metrics,
+            get_activities,
+            add_activity,
+            update_activity_checked,
+            delete_activity,
+            get_daily_activity_summary
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
